@@ -41,7 +41,6 @@ stages:
       - models/feature_names.json
       - models/train_meta.json
     outs:
-      - metrics/metrics.json
       - metrics/confusion_matrix.csv
       - metrics/feature_importance.csv
       - metrics/fairness_report.json

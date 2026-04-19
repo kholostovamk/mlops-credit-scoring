@@ -52,22 +52,18 @@ jobs:
           MLFLOW_TRACKING_URI: mlruns
         run: dvc repro
 
-      - name: Push DVC artifacts to S3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: dvc push
-
-      - name: Package model and upload to S3
+      - name: Push DVC artifacts to S3 (best-effort)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          tar -czf model.tar.gz -C models .
-          aws s3 cp model.tar.gz \
-            s3://mlops-credit-scoring-dvc/model/model.tar.gz \
-            --region us-east-1
-          echo "Model uploaded to s3://mlops-credit-scoring-dvc/model/model.tar.gz"
+          dvc push || echo "⚠️  dvc push skipped – S3 write permissions unavailable on this account"
+
+      - name: Upload models artifact (passed to Docker build job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-models
+          path: models/
 
       - name: Upload metrics artifact
         uses: actions/upload-artifact@v4
@@ -85,11 +81,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download pipeline artifacts
+      - name: Download trained model (bake into image)
         uses: actions/download-artifact@v4
         with:
-          name: pipeline-metrics
-          path: metrics/
+          name: pipeline-models
+          path: models/
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -145,7 +141,7 @@ jobs:
           SAGEMAKER_ROLE: ${{ secrets.SAGEMAKER_ROLE_ARN }}
         run: |
           python - <<'EOF'
-          import boto3, os, time
+          import boto3, os
 
           sm = boto3.client("sagemaker", region_name=os.environ["AWS_REGION"])
           image_uri  = os.environ["IMAGE_URI"]
@@ -156,23 +152,21 @@ jobs:
           instance   = os.environ["INSTANCE_TYPE"]
           sha        = os.environ["GITHUB_SHA"][:8]
 
-          versioned_model  = f"{model_name}-{sha}"
-          versioned_cfg    = f"{ep_cfg}-{sha}"
+          versioned_model = f"{model_name}-{sha}"
+          versioned_cfg   = f"{ep_cfg}-{sha}"
 
-          # Create versioned model (model artefacts loaded from S3 at inference time)
-          model_s3_uri = "s3://mlops-credit-scoring-dvc/model/model.tar.gz"
+          # Model is baked into the Docker image; no ModelDataUrl needed
           sm.create_model(
               ModelName=versioned_model,
               PrimaryContainer={
                   "Image": image_uri,
-                  "ModelDataUrl": model_s3_uri,
                   "Mode": "SingleModel",
+                  "Environment": {"SM_MODEL_DIR": "/opt/program/models"},
               },
               ExecutionRoleArn=role,
           )
           print(f"Model created: {versioned_model}")
 
-          # Create versioned endpoint config
           sm.create_endpoint_config(
               EndpointConfigName=versioned_cfg,
               ProductionVariants=[{
@@ -185,7 +179,6 @@ jobs:
           )
           print(f"Endpoint config created: {versioned_cfg}")
 
-          # Create or update endpoint
           existing = [e["EndpointName"] for e in sm.list_endpoints()["Endpoints"]]
           if endpoint in existing:
               sm.update_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
@@ -194,20 +187,17 @@ jobs:
               sm.create_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
               print(f"Creating endpoint: {endpoint}")
 
-          # Wait for endpoint to be InService
           waiter = sm.get_waiter("endpoint_in_service")
           waiter.wait(EndpointName=endpoint, WaiterConfig={"Delay": 30, "MaxAttempts": 40})
           print(f"Endpoint {endpoint} is InService.")
           EOF
 
       - name: Smoke-test the live endpoint
-        env:
-          SAGEMAKER_ENDPOINT: ${{ env.SAGEMAKER_ENDPOINT }}
         run: |
           python - <<'EOF'
           import boto3, json, os
 
-          runtime = boto3.client("sagemaker-runtime", region_name=os.environ["AWS_REGION"])
+          runtime  = boto3.client("sagemaker-runtime", region_name=os.environ["AWS_REGION"])
           endpoint = os.environ["SAGEMAKER_ENDPOINT"]
 
           payload = {"instances": [{

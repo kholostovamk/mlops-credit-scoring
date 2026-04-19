@@ -32,17 +32,19 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /opt/program
 
-# Copy source code (model artefacts are NOT baked in – SageMaker unpacks
-# model.tar.gz from S3 into SM_MODEL_DIR=/opt/ml/model at container start)
+# Copy source code and baked-in model artefacts.
+# models/ is populated by the CI job via GitHub Actions artifact download.
 COPY src/           ./src/
 COPY inference/     ./inference/
+COPY models/        ./models/
 
 # SageMaker expects the serve script at /opt/program/serve
 COPY inference/predict.py ./predict.py
 
 # SageMaker serve entrypoint
 ENV SAGEMAKER_PROGRAM predict.py
-ENV SM_MODEL_DIR /opt/ml/model
+# Model is baked into the image at /opt/program/models
+ENV SM_MODEL_DIR /opt/program/models
 
 # Expose port for local testing (Flask)
 EXPOSE 8080

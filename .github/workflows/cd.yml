@@ -179,10 +179,18 @@ jobs:
           )
           print(f"Endpoint config created: {versioned_cfg}")
 
-          existing = [e["EndpointName"] for e in sm.list_endpoints()["Endpoints"]]
+          existing = {e["EndpointName"]: e["EndpointStatus"]
+                      for e in sm.list_endpoints()["Endpoints"]}
           if endpoint in existing:
-              sm.update_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
-              print(f"Updating endpoint: {endpoint}")
+              if existing[endpoint] == "Failed":
+                  import time
+                  sm.delete_endpoint(EndpointName=endpoint)
+                  print(f"Deleted failed endpoint, recreating...")
+                  time.sleep(15)
+                  sm.create_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
+              else:
+                  sm.update_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
+                  print(f"Updating endpoint: {endpoint}")
           else:
               sm.create_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
               print(f"Creating endpoint: {endpoint}")

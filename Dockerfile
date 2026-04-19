@@ -32,38 +32,21 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /opt/program
 
-# Copy source code and baked-in model artefacts.
-# models/ is populated by the CI job via GitHub Actions artifact download.
-COPY src/           ./src/
-COPY inference/     ./inference/
-COPY models/        ./models/
+# Copy source code, inference scripts, and baked-in model artefacts.
+# models/ is populated by the CI artifact download step before docker build.
+COPY src/               ./src/
+COPY inference/         ./inference/
+COPY models/            ./models/
 
-# SageMaker expects the serve script at /opt/program/serve
+# Bring predict.py and serve.py to the working directory root so imports work
 COPY inference/predict.py ./predict.py
+COPY inference/serve.py   ./serve.py
 
-# SageMaker serve entrypoint
-ENV SAGEMAKER_PROGRAM predict.py
 # Model is baked into the image at /opt/program/models
 ENV SM_MODEL_DIR /opt/program/models
 
-# Expose port for local testing (Flask)
+# Expose port for local testing and SageMaker
 EXPOSE 8080
 
-# Default: run the inference server
-CMD ["python", "-c", "\
-import os, json, joblib; \
-from flask import Flask, request, jsonify; \
-from inference.predict import model_fn, input_fn, predict_fn, output_fn; \
-app = Flask(__name__); \
-MODEL = model_fn(os.environ.get('SM_MODEL_DIR', 'models')); \
-@app.route('/ping', methods=['GET']); \
-def ping(): return 'OK', 200; \
-@app.route('/invocations', methods=['POST']); \
-def invoke(): \
-    ct = request.content_type or 'application/json'; \
-    inp = input_fn(request.get_data(as_text=True), ct); \
-    out = predict_fn(inp, MODEL); \
-    body, mime = output_fn(out, request.headers.get('Accept', 'application/json')); \
-    return body, 200, {'Content-Type': mime}; \
-app.run(host='0.0.0.0', port=8080) \
-"]
+# Start the Flask inference server
+CMD ["python", "serve.py"]

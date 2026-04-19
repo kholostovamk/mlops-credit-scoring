@@ -1,0 +1,50 @@
+stages:
+
+  ingest:
+    cmd: python src/data_ingest.py
+    deps:
+      - src/data_ingest.py
+    outs:
+      - data/raw/credit_default_raw.xls
+      - data/staged/data.csv
+
+  validate:
+    cmd: python src/data_validation.py
+    deps:
+      - src/data_validation.py
+      - data/staged/data.csv
+    outs:
+      - data/staged/validation_report.json
+
+  train:
+    cmd: python src/train_and_tune.py
+    deps:
+      - src/train_and_tune.py
+      - data/staged/data.csv
+    outs:
+      - models/model.joblib
+      - models/feature_names.json
+      - models/train_meta.json
+    params:
+      - params.yaml:
+          - train.test_size
+          - train.random_state
+          - train.n_trials
+          - train.cv_folds
+
+  evaluate:
+    cmd: python src/evaluate.py
+    deps:
+      - src/evaluate.py
+      - data/staged/data.csv
+      - models/model.joblib
+      - models/feature_names.json
+      - models/train_meta.json
+    outs:
+      - metrics/metrics.json
+      - metrics/confusion_matrix.csv
+      - metrics/feature_importance.csv
+      - metrics/fairness_report.json
+    metrics:
+      - metrics/metrics.json:
+          cache: false

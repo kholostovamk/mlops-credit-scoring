@@ -1,0 +1,4 @@
+# Ignore Python cache inside tracked directories
+**/__pycache__
+**/*.pyc
+**/.ipynb_checkpoints

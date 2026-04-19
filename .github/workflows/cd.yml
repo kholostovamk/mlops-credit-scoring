@@ -1,0 +1,213 @@
+name: CD – Full Pipeline, Docker Build & SageMaker Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PYTHON_VERSION: "3.11"
+  AWS_REGION: us-east-1
+  ECR_REPO: mlops-credit-scoring
+  SAGEMAKER_ENDPOINT: credit-scoring-endpoint
+  SAGEMAKER_ENDPOINT_CONFIG: credit-scoring-config
+  SAGEMAKER_MODEL_NAME: credit-scoring-model
+  INSTANCE_TYPE: ml.m5.large
+
+jobs:
+  # ─── 1. Full DVC pipeline ──────────────────────────────────────────────────
+  dvc-pipeline:
+    name: Run Full DVC Pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure DVC remote (S3)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          dvc remote modify myremote access_key_id $AWS_ACCESS_KEY_ID
+          dvc remote modify myremote secret_access_key $AWS_SECRET_ACCESS_KEY
+
+      - name: Pull cached DVC artifacts
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: dvc pull --run-cache || true
+
+      - name: Run DVC pipeline end-to-end
+        env:
+          MLFLOW_TRACKING_URI: mlruns
+        run: dvc repro
+
+      - name: Push DVC artifacts to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: dvc push
+
+      - name: Upload metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-metrics
+          path: metrics/
+
+  # ─── 2. Docker build & push to ECR ────────────────────────────────────────
+  docker-build-push:
+    name: Build & Push Docker Image to ECR
+    runs-on: ubuntu-latest
+    needs: dvc-pipeline
+    outputs:
+      image_uri: ${{ steps.push.outputs.image_uri }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download pipeline artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pipeline-metrics
+          path: metrics/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        id: push
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="${REGISTRY}/${ECR_REPO}:${TAG}"
+          docker build -t "$IMAGE_URI" .
+          docker tag "$IMAGE_URI" "${REGISTRY}/${ECR_REPO}:latest"
+          docker push "$IMAGE_URI"
+          docker push "${REGISTRY}/${ECR_REPO}:latest"
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "Pushed: ${IMAGE_URI}"
+
+  # ─── 3. SageMaker deployment ───────────────────────────────────────────────
+  sagemaker-deploy:
+    name: Update SageMaker Endpoint
+    runs-on: ubuntu-latest
+    needs: docker-build-push
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install boto3
+        run: pip install boto3 sagemaker
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy / update SageMaker endpoint
+        env:
+          IMAGE_URI: ${{ needs.docker-build-push.outputs.image_uri }}
+          SAGEMAKER_ROLE: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+        run: |
+          python - <<'EOF'
+          import boto3, os, time
+
+          sm = boto3.client("sagemaker", region_name=os.environ["AWS_REGION"])
+          image_uri  = os.environ["IMAGE_URI"]
+          role       = os.environ["SAGEMAKER_ROLE"]
+          model_name = os.environ["SAGEMAKER_MODEL_NAME"]
+          ep_cfg     = os.environ["SAGEMAKER_ENDPOINT_CONFIG"]
+          endpoint   = os.environ["SAGEMAKER_ENDPOINT"]
+          instance   = os.environ["INSTANCE_TYPE"]
+          sha        = os.environ["GITHUB_SHA"][:8]
+
+          versioned_model  = f"{model_name}-{sha}"
+          versioned_cfg    = f"{ep_cfg}-{sha}"
+
+          # Create versioned model
+          sm.create_model(
+              ModelName=versioned_model,
+              PrimaryContainer={"Image": image_uri, "Mode": "SingleModel"},
+              ExecutionRoleArn=role,
+          )
+          print(f"Model created: {versioned_model}")
+
+          # Create versioned endpoint config
+          sm.create_endpoint_config(
+              EndpointConfigName=versioned_cfg,
+              ProductionVariants=[{
+                  "VariantName": "AllTraffic",
+                  "ModelName": versioned_model,
+                  "InitialInstanceCount": 1,
+                  "InstanceType": instance,
+                  "InitialVariantWeight": 1,
+              }],
+          )
+          print(f"Endpoint config created: {versioned_cfg}")
+
+          # Create or update endpoint
+          existing = [e["EndpointName"] for e in sm.list_endpoints()["Endpoints"]]
+          if endpoint in existing:
+              sm.update_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
+              print(f"Updating endpoint: {endpoint}")
+          else:
+              sm.create_endpoint(EndpointName=endpoint, EndpointConfigName=versioned_cfg)
+              print(f"Creating endpoint: {endpoint}")
+
+          # Wait for endpoint to be InService
+          waiter = sm.get_waiter("endpoint_in_service")
+          waiter.wait(EndpointName=endpoint, WaiterConfig={"Delay": 30, "MaxAttempts": 40})
+          print(f"Endpoint {endpoint} is InService.")
+          EOF
+
+      - name: Smoke-test the live endpoint
+        env:
+          SAGEMAKER_ENDPOINT: ${{ env.SAGEMAKER_ENDPOINT }}
+        run: |
+          python - <<'EOF'
+          import boto3, json, os
+
+          runtime = boto3.client("sagemaker-runtime", region_name=os.environ["AWS_REGION"])
+          endpoint = os.environ["SAGEMAKER_ENDPOINT"]
+
+          payload = {"instances": [{
+              "LIMIT_BAL": 50000, "SEX": 2, "EDUCATION": 2, "MARRIAGE": 1, "AGE": 35,
+              "PAY_0": 0, "PAY_2": 0, "PAY_3": 0, "PAY_4": 0, "PAY_5": 0, "PAY_6": 0,
+              "BILL_AMT1": 15000, "BILL_AMT2": 14000, "BILL_AMT3": 13000,
+              "BILL_AMT4": 12000, "BILL_AMT5": 11000, "BILL_AMT6": 10000,
+              "PAY_AMT1": 2000, "PAY_AMT2": 2000, "PAY_AMT3": 2000,
+              "PAY_AMT4": 2000, "PAY_AMT5": 2000, "PAY_AMT6": 2000,
+          }]}
+
+          resp = runtime.invoke_endpoint(
+              EndpointName=endpoint,
+              ContentType="application/json",
+              Body=json.dumps(payload),
+          )
+          result = json.loads(resp["Body"].read())
+          print(f"Inference result: {result}")
+          assert "predictions" in result, "Missing predictions key"
+          print("Endpoint smoke test PASSED.")
+          EOF

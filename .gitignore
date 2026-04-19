@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+*.env
+
+# Data – tracked by DVC, not Git
+data/raw/
+data/staged/data.csv
+data/staged/validation_report.json
+models/
+metrics/
+
+# MLflow local runs (commit .dvc/config & dvc.lock only)
+mlruns/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Testing
+.pytest_cache/
+htmlcov/
+coverage.xml
+.coverage

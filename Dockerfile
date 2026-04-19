@@ -32,10 +32,10 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /opt/program
 
-# Copy source code
+# Copy source code (model artefacts are NOT baked in – SageMaker unpacks
+# model.tar.gz from S3 into SM_MODEL_DIR=/opt/ml/model at container start)
 COPY src/           ./src/
 COPY inference/     ./inference/
-COPY models/        ./models/   2>/dev/null || true
 
 # SageMaker expects the serve script at /opt/program/serve
 COPY inference/predict.py ./predict.py

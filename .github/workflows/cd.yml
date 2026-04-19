@@ -56,6 +56,17 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: dvc push
 
+      - name: Package model and upload to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          tar -czf model.tar.gz -C models .
+          aws s3 cp model.tar.gz \
+            s3://mlops-credit-scoring-dvc/model/model.tar.gz \
+            --region us-east-1
+          echo "Model uploaded to s3://mlops-credit-scoring-dvc/model/model.tar.gz"
+
       - name: Upload metrics artifact
         uses: actions/upload-artifact@v4
         with:
@@ -146,10 +157,15 @@ jobs:
           versioned_model  = f"{model_name}-{sha}"
           versioned_cfg    = f"{ep_cfg}-{sha}"
 
-          # Create versioned model
+          # Create versioned model (model artefacts loaded from S3 at inference time)
+          model_s3_uri = "s3://mlops-credit-scoring-dvc/model/model.tar.gz"
           sm.create_model(
               ModelName=versioned_model,
-              PrimaryContainer={"Image": image_uri, "Mode": "SingleModel"},
+              PrimaryContainer={
+                  "Image": image_uri,
+                  "ModelDataUrl": model_s3_uri,
+                  "Mode": "SingleModel",
+              },
               ExecutionRoleArn=role,
           )
           print(f"Model created: {versioned_model}")

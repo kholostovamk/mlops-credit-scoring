@@ -76,7 +76,9 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install "pathspec==0.11.2" --force-reinstall --quiet
 
       - name: Create smoke-test dataset
         run: |

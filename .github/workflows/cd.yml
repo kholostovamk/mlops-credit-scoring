@@ -98,8 +98,8 @@ jobs:
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push Docker image
-        id: push
+      - name: Build Docker image
+        id: build
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           TAG: ${{ github.sha }}
@@ -107,6 +107,31 @@ jobs:
           IMAGE_URI="${REGISTRY}/${ECR_REPO}:${TAG}"
           docker build -t "$IMAGE_URI" .
           docker tag "$IMAGE_URI" "${REGISTRY}/${ECR_REPO}:latest"
+          echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT
+          echo "Built: ${IMAGE_URI}"
+
+      - name: Smoke-test container locally
+        env:
+          IMAGE_URI: ${{ steps.build.outputs.image_uri }}
+        run: |
+          docker run -d --name test-inference \
+            -p 8080:8080 \
+            -e SM_MODEL_DIR=/opt/program/models \
+            "$IMAGE_URI"
+          echo "Waiting 20s for Flask to start..."
+          sleep 20
+          curl -sf http://localhost:8080/ping \
+            || (echo "=== CONTAINER LOGS ===" && docker logs test-inference && exit 1)
+          docker stop test-inference && docker rm test-inference
+          echo "Local container smoke test PASSED ✓"
+
+      - name: Push Docker image to ECR
+        id: push
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="${REGISTRY}/${ECR_REPO}:${TAG}"
           docker push "$IMAGE_URI"
           docker push "${REGISTRY}/${ECR_REPO}:latest"
           echo "image_uri=${IMAGE_URI}" >> $GITHUB_OUTPUT

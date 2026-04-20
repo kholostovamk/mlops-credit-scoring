@@ -42,11 +42,17 @@ COPY models/            ./models/
 COPY inference/predict.py ./predict.py
 COPY inference/serve.py   ./serve.py
 
+# Create a 'serve' executable that SageMaker invokes as: docker run <image> serve
+# SageMaker overrides CMD with 'serve', so this must exist as a runnable command in PATH.
+RUN printf '#!/bin/bash\nexec python /opt/program/serve.py "$@"\n' > /opt/program/serve \
+    && chmod +x /opt/program/serve
+
 # Model is baked into the image at /opt/program/models
-ENV SM_MODEL_DIR /opt/program/models
+ENV SM_MODEL_DIR=/opt/program/models \
+    PATH="/opt/program:${PATH}"
 
 # Expose port for local testing and SageMaker
 EXPOSE 8080
 
-# Start the Flask inference server
-CMD ["python", "serve.py"]
+# Default CMD for local testing; SageMaker overrides this with 'serve'
+CMD ["serve"]

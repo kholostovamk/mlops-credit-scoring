@@ -114,10 +114,11 @@ jobs:
         env:
           IMAGE_URI: ${{ steps.build.outputs.image_uri }}
         run: |
+          # Invoke with 'serve' to mirror exactly how SageMaker starts the container
           docker run -d --name test-inference \
             -p 8080:8080 \
             -e SM_MODEL_DIR=/opt/program/models \
-            "$IMAGE_URI"
+            "$IMAGE_URI" serve
           echo "Waiting 20s for Flask to start..."
           sleep 20
           curl -sf http://localhost:8080/ping \
@@ -221,8 +222,14 @@ jobs:
               print(f"Creating endpoint: {endpoint}")
 
           waiter = sm.get_waiter("endpoint_in_service")
-          waiter.wait(EndpointName=endpoint, WaiterConfig={"Delay": 30, "MaxAttempts": 40})
-          print(f"Endpoint {endpoint} is InService.")
+          try:
+              waiter.wait(EndpointName=endpoint, WaiterConfig={"Delay": 30, "MaxAttempts": 40})
+              print(f"Endpoint {endpoint} is InService.")
+          except Exception as e:
+              details = sm.describe_endpoint(EndpointName=endpoint)
+              print(f"ERROR: Endpoint status: {details['EndpointStatus']}")
+              print(f"ERROR: FailureReason: {details.get('FailureReason', 'N/A')}")
+              raise
           EOF
 
       - name: Smoke-test the live endpoint

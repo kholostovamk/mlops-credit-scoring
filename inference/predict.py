@@ -85,7 +85,7 @@ def predict_fn(input_data: pd.DataFrame, model_artifacts: dict):
 
 def output_fn(prediction, accept: str = "application/json"):
     """Serialise the prediction dict to the requested format."""
-    if accept == "application/json":
+    if accept in ("application/json", "*/*"):
         return json.dumps(prediction), "application/json"
     elif accept == "text/csv":
         rows = zip(prediction["probabilities"], prediction["predictions"])

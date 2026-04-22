@@ -57,7 +57,8 @@ End-to-end production MLOps pipeline for predicting credit card payment default,
 │  ├─ model_audit_log.md        Version audit trail
 │  └─ incident_playbook.md      Runbooks for P1–P4 incidents
 ├─ inference/
-│  └─ predict.py                SageMaker inference hooks
+│  ├─ predict.py                SageMaker inference hooks (model_fn, input_fn, predict_fn, output_fn)
+│  └─ serve.py                  Flask server exposing /ping and /invocations
 ├─ metrics/                     JSON metrics + fairness report (DVC-tracked)
 ├─ mlruns/                      Local MLflow tracking (gitignored)
 ├─ models/                      Trained model artefacts (DVC-tracked)
@@ -138,9 +139,9 @@ mlflow ui --backend-store-uri mlruns
 # Build
 docker build -t credit-scoring:local .
 
-# Run the inference server locally
+# Run the inference server locally (model is baked into the image)
 docker run -p 8080:8080 \
-  -v $(pwd)/models:/opt/ml/model \
+  -e SM_MODEL_DIR=/opt/program/models \
   credit-scoring:local
 
 # Smoke-test with curl

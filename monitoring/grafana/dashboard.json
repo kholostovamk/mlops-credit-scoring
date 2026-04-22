@@ -9,48 +9,89 @@
       "id": 1,
       "title": "Inference Requests / s",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 0, "w": 8, "h": 6},
-      "targets": [{
-        "expr": "rate(inference_requests_total[1m])",
-        "legendFormat": "req/s"
-      }]
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "rate(inference_requests_total{status=\"success\"}[1m])",
+          "legendFormat": "req/s"
+        }
+      ]
     },
     {
       "id": 2,
       "title": "p95 Inference Latency (ms)",
       "type": "timeseries",
-      "gridPos": {"x": 8, "y": 0, "w": 8, "h": 6},
-      "targets": [{
-        "expr": "histogram_quantile(0.95, rate(inference_latency_seconds_bucket[5m])) * 1000",
-        "legendFormat": "p95 latency ms"
-      }]
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, rate(inference_latency_seconds_bucket[5m])) * 1000",
+          "legendFormat": "p95 latency ms"
+        }
+      ]
     },
     {
       "id": 3,
       "title": "Error Rate (%)",
       "type": "timeseries",
-      "gridPos": {"x": 16, "y": 0, "w": 8, "h": 6},
-      "targets": [{
-        "expr": "rate(inference_errors_total[5m]) / rate(inference_requests_total[5m]) * 100",
-        "legendFormat": "error %"
-      }]
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "rate(inference_requests_total{status=\"error\"}[5m]) / rate(inference_requests_total[5m]) * 100",
+          "legendFormat": "error %"
+        }
+      ]
     },
     {
       "id": 4,
       "title": "Max Feature Drift (PSI)",
       "type": "gauge",
-      "gridPos": {"x": 0, "y": 6, "w": 6, "h": 6},
-      "targets": [{
-        "expr": "model_feature_drift_score",
-        "legendFormat": "PSI"
-      }],
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 6,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "model_feature_drift_score",
+          "legendFormat": "PSI"
+        }
+      ],
       "options": {
-        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
         "thresholds": {
           "steps": [
-            {"color": "green", "value": 0},
-            {"color": "yellow", "value": 0.1},
-            {"color": "red", "value": 0.25}
+            {
+              "color": "green",
+              "value": 0
+            },
+            {
+              "color": "yellow",
+              "value": 0.1
+            },
+            {
+              "color": "red",
+              "value": 0.25
+            }
           ]
         }
       }
@@ -59,31 +100,52 @@
       "id": 5,
       "title": "Rolling Mean Prediction Probability",
       "type": "timeseries",
-      "gridPos": {"x": 6, "y": 6, "w": 10, "h": 6},
-      "targets": [{
-        "expr": "model_prediction_mean",
-        "legendFormat": "mean prob"
-      }]
+      "gridPos": {
+        "x": 6,
+        "y": 6,
+        "w": 10,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "inference_prediction_probability",
+          "legendFormat": "mean prob"
+        }
+      ]
     },
     {
       "id": 6,
       "title": "CPU Usage (%)",
       "type": "timeseries",
-      "gridPos": {"x": 16, "y": 6, "w": 8, "h": 6},
-      "targets": [{
-        "expr": "100 - (avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100)",
-        "legendFormat": "cpu %"
-      }]
+      "gridPos": {
+        "x": 16,
+        "y": 6,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100)",
+          "legendFormat": "cpu %"
+        }
+      ]
     },
     {
       "id": 7,
       "title": "Memory Usage (%)",
       "type": "timeseries",
-      "gridPos": {"x": 0, "y": 12, "w": 8, "h": 6},
-      "targets": [{
-        "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
-        "legendFormat": "mem %"
-      }]
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 8,
+        "h": 6
+      },
+      "targets": [
+        {
+          "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+          "legendFormat": "mem %"
+        }
+      ]
     }
   ]
 }

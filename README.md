@@ -187,27 +187,24 @@ docker tag credit-scoring:local $ECR/mlops-credit-scoring:latest
 docker push $ECR/mlops-credit-scoring:latest
 ```
 
-### Step 3 — Package and upload model artefacts to S3
+### Step 3 — Create SageMaker endpoint
 
-```bash
-# After dvc repro has run locally
-tar -czf model.tar.gz -C models .
-aws s3 cp model.tar.gz s3://mlops-credit-scoring-dvc/model/model.tar.gz
-```
-
-### Step 4 — Create SageMaker endpoint
+> **Note:** The model is baked into the Docker image (`ENV SM_MODEL_DIR /opt/program/models`), so no S3 model upload is needed.
 
 ```python
 import boto3
 
-sm     = boto3.client("sagemaker", region_name="us-east-1")
-ROLE   = "<your-sagemaker-execution-role-arn>"
-IMAGE  = f"{ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/mlops-credit-scoring:latest"
-MODEL_S3 = "s3://mlops-credit-scoring-dvc/model/model.tar.gz"
+sm    = boto3.client("sagemaker", region_name="us-east-1")
+ROLE  = "<your-sagemaker-execution-role-arn>"
+IMAGE = f"{ACCOUNT}.dkr.ecr.us-east-1.amazonaws.com/mlops-credit-scoring:latest"
 
 sm.create_model(
     ModelName="credit-scoring-model-v1",
-    PrimaryContainer={"Image": IMAGE, "ModelDataUrl": MODEL_S3},
+    PrimaryContainer={
+        "Image": IMAGE,
+        "Mode": "SingleModel",
+        "Environment": {"SM_MODEL_DIR": "/opt/program/models"},
+    },
     ExecutionRoleArn=ROLE,
 )
 sm.create_endpoint_config(
@@ -226,7 +223,7 @@ sm.create_endpoint(
 print("Endpoint creation started — takes ~5 minutes to be InService.")
 ```
 
-### Step 5 — Test the live endpoint
+### Step 4 — Test the live endpoint
 
 ```python
 import boto3, json
@@ -266,15 +263,21 @@ Add the following secrets to your GitHub repository under **Settings → Secrets
 
 ## Monitoring
 
-Start the local monitoring stack with Docker Compose (optional):
+Start the full local monitoring stack (inference server + Prometheus + Grafana + drift detector):
 
 ```bash
-docker-compose -f monitoring/docker-compose.yml up -d
-# Prometheus: http://localhost:9090
-# Grafana:    http://localhost:3000  (admin / admin)
+docker compose up --build
+# Inference server: http://localhost:8080/ping
+# Prometheus:       http://localhost:9090
+# Grafana:          http://localhost:3000  (admin / admin)
 ```
 
-Import `monitoring/grafana/dashboard.json` via Grafana UI → Dashboards → Import.
+The Grafana dashboard (`monitoring/grafana/dashboard.json`) is provisioned automatically on startup — no manual import needed. It shows request throughput, p95 latency, error rate, and PSI drift score.
+
+Alert rules in `monitoring/alert_rules.yml` fire when:
+- Inference error rate > 5% for 2 minutes
+- p95 latency > 500 ms for 5 minutes
+- PSI drift score > 0.2 (significant distribution shift)
 
 ---
 

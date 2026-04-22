@@ -1,0 +1,96 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MLOps Credit Scoring — Local Monitoring Stack
+#
+# Starts:
+#   • inference-server  – Flask inference server (port 8080)
+#   • drift-detector    – PSI drift sidecar, exposes metrics on port 8081
+#   • node-exporter     – System metrics (CPU / memory / disk)
+#   • prometheus        – Scrapes all three targets (port 9090)
+#   • grafana           – Dashboard UI, auto-loads dashboard.json (port 3000)
+#
+# Usage:
+#   docker compose up --build        # start stack
+#   curl http://localhost:8080/ping  # health check
+#   open http://localhost:3000       # Grafana (admin / admin)
+#   open http://localhost:9090       # Prometheus
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  inference-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inference-server
+    ports:
+      - "8080:8080"
+    environment:
+      SM_MODEL_DIR: /opt/program/models
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  drift-detector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drift-detector
+    command: python /opt/program/src/monitoring/drift_detector.py
+    ports:
+      - "8081:8081"
+    environment:
+      SM_MODEL_DIR: /opt/program/models
+    depends_on:
+      inference-server:
+        condition: service_healthy
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: node-exporter
+    ports:
+      - "9100:9100"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    depends_on:
+      - inference-server
+      - drift-detector
+      - node-exporter
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/dashboard.json
+    volumes:
+      - ./monitoring/grafana/dashboard.json:/var/lib/grafana/dashboards/dashboard.json:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:

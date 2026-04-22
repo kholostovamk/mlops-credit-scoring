@@ -21,7 +21,6 @@ import json
 import logging
 import joblib
 import pandas as pd
-import numpy as np
 import mlflow
 import mlflow.sklearn
 from sklearn.model_selection import train_test_split

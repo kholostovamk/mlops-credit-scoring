@@ -13,7 +13,6 @@ import os
 import json
 import logging
 import joblib
-import numpy as np
 import pandas as pd
 import mlflow
 import mlflow.sklearn

@@ -29,10 +29,11 @@ services:
     environment:
       SM_MODEL_DIR: /opt/program/models
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/ping"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
 
   drift-detector:
     build:
